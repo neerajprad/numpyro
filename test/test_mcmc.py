@@ -161,3 +161,26 @@ def test_binomial_stable(with_logits):
                               progbar=True)
 
     assert_allclose(np.mean(hmc_states['p'], 0), data['x'] / data['n'], rtol=0.05)
+
+
+@pytest.mark.parametrize('num_obs', [1, 2, 5, 10])
+def test_uniform_binomial(num_obs):
+    warmup_steps, num_samples = 400, 400
+
+    def model(num_trials, success):
+        phi_prior = dist.Uniform(np.zeros((np.shape(num_trials)[0],)),
+                                 np.ones((np.shape(num_trials)[0],)))
+        phi = sample('phi', phi_prior)
+        return sample('obs', dist.Binomial(phi, num_trials), obs=success)
+
+    true_probs = random.uniform(random.PRNGKey(1), shape=(num_obs,))
+    num_trials = np.full((num_obs,), 1000)
+    success = dist.Binomial(true_probs, num_trials).sample(random.PRNGKey(2))
+    init_params, potential_fn, transform_fn = initialize_model(random.PRNGKey(2), model, (num_trials, success), {})
+    init_kernel, sample_kernel = hmc(potential_fn)
+    hmc_state = init_kernel(init_params, num_warmup_steps=warmup_steps, progbar=True)
+    hmc_states = fori_collect(num_samples, sample_kernel, hmc_state,
+                              transform=lambda x: transform_fn(x.z),
+                              progbar=True)
+
+    assert_allclose(np.mean(hmc_states['phi'], 0), true_probs, atol=0.05)
